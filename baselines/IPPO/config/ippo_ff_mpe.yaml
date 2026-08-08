@@ -14,10 +14,10 @@
 "ENV_NAME": "MPE_simple_spread_v3"
 "ENV_KWARGS": {}
 "ANNEAL_LR": True
-"SEED": 30
+"SEED": 50
 "NUM_SEEDS": 10
 
 # WandB Params
-"ENTITY": ""
+"ENTITY": "yachen-tian-rwth-aachen-university"
 "PROJECT": "jaxmarl-mpe"
-"WANDB_MODE" : "disabled"
+"WANDB_MODE" : "offline"

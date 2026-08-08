@@ -16,9 +16,9 @@
 "MAX_GRAD_NORM": 0.5
 "ACTIVATION": "tanh"
 "ANNEAL_LR": True
-"SEED": 30
+"SEED": 50
 
 # WandB Params
-"ENTITY": ""
-"PROJECT": ""
-"WANDB_MODE" : "disabled"
+"ENTITY": "yachen-tian-rwth-aachen-university"
+"PROJECT": "jaxmarl-mpe"
+"WANDB_MODE" : "offline"

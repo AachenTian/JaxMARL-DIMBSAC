@@ -24,6 +24,8 @@ import jaxmarl
 import wandb
 from jaxmarl.wrappers.baselines import MPELogWrapper
 
+from jaxmarl.environments.mpe import MPEVisualizer
+
 
 class ScannedRNN(nn.Module):
     @functools.partial(
@@ -451,6 +453,102 @@ def make_train(config):
 
     return train
 
+def make_animation(config, trained_params, save_path="ippo_rnn_mpe.gif"):
+    """使用训练完成的 RNN 策略运行一个 episode，并保存 GIF。"""
+
+    # 使用原始环境，不使用 MPELogWrapper
+    eval_env = jaxmarl.make(config["ENV_NAME"])
+
+    # 创建与训练时完全相同的 RNN 网络
+    network = ActorCriticRNN(
+        eval_env.action_space(eval_env.agents[0]).n,
+        config=config,
+    )
+
+    # 单独设置一个评估随机种子
+    rng = jax.random.PRNGKey(config["SEED"] + 1000)
+    rng, reset_rng = jax.random.split(rng)
+
+    # 重置单个环境
+    obs, env_state = eval_env.reset(reset_rng)
+
+    # 单环境中，每个智能体对应一个 RNN hidden state
+    hidden = ScannedRNN.initialize_carry(
+        eval_env.num_agents,
+        config["GRU_HIDDEN_DIM"],
+    )
+
+    # 第一步之前，所有智能体都没有结束
+    last_done = jnp.zeros(
+        (eval_env.num_agents,),
+        dtype=bool,
+    )
+
+    # 保存每一步环境状态，用于生成动画
+    state_seq = [jax.device_get(env_state)]
+
+    for _ in range(eval_env.max_steps):
+        # 将每个智能体的观测拼成：
+        # (num_agents, observation_dim)
+        obs_batch = batchify(
+            obs,
+            eval_env.agents,
+            eval_env.num_agents,
+        )
+
+        # RNN 要求时间维度位于最前面：
+        # obs:   (1, num_agents, observation_dim)
+        # done:  (1, num_agents)
+        network_input = (
+            obs_batch[jnp.newaxis, :],
+            last_done[jnp.newaxis, :],
+        )
+
+        # 使用并更新 GRU hidden state
+        hidden, pi, _ = network.apply(
+            trained_params,
+            hidden,
+            network_input,
+        )
+
+        # pi 的形状带一个长度为 1 的时间维度
+        # mode() 表示选择概率最大的动作，动画更稳定
+        action = pi.mode().squeeze(axis=0)
+
+        # 转回 JaxMARL 所需的动作字典
+        actions = {
+            agent: action[i]
+            for i, agent in enumerate(eval_env.agents)
+        }
+
+        # 环境推进一步
+        rng, step_rng = jax.random.split(rng)
+        obs, env_state, reward, done, info = eval_env.step(
+            step_rng,
+            env_state,
+            actions,
+        )
+
+        state_seq.append(jax.device_get(env_state))
+
+        # 下一步输入 RNN 的 done
+        last_done = jnp.asarray(
+            [done[agent] for agent in eval_env.agents],
+            dtype=bool,
+        )
+
+        # 整个 episode 结束
+        if bool(jax.device_get(done["__all__"])):
+            break
+
+    # 生成并保存 GIF
+    visualizer = MPEVisualizer(eval_env, state_seq)
+    visualizer.animate(
+        save_fname=save_path,
+        view=False,
+    )
+
+    print(f"动画已保存到：{save_path}")
 
 @hydra.main(version_base=None, config_path="config", config_name="ippo_rnn_mpe")
 def main(config):
@@ -466,7 +564,21 @@ def main(config):
     )
     rng = jax.random.PRNGKey(config["SEED"])
     train_jit = jax.jit(make_train(config), device=jax.devices()[0])
-    train_jit(rng)
+    out = train_jit(rng)
+    final_runner_state, final_update_steps = out["runner_state"]
+
+    # 第 0 项就是最终 TrainState
+    trained_state = final_runner_state[0]
+
+    # 从 TrainState 中取得最终网络参数
+    trained_params = trained_state.params
+
+    # 用最终策略生成动画
+    make_animation(
+        config,
+        trained_params,
+        save_path="ippo_rnn_mpe.gif",
+    )
 
     """updates_x = jnp.arange(out["metrics"]["total_loss"][0].shape[0])
     loss_table = jnp.stack([updates_x, out["metrics"]["total_loss"].mean(axis=0), out["metrics"]["actor_loss"].mean(axis=0), out["metrics"]["critic_loss"].mean(axis=0), out["metrics"]["entropy"].mean(axis=0), out["metrics"]["ratio"].mean(axis=0)], axis=1)

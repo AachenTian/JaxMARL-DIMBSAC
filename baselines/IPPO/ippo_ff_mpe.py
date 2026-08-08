@@ -21,6 +21,8 @@ import jaxmarl
 import wandb
 from jaxmarl.wrappers.baselines import MPELogWrapper as LogWrapper
 
+from jaxmarl.environments.mpe import MPEVisualizer
+
 
 class ActorCritic(nn.Module):
     action_dim: Sequence[int]
@@ -347,6 +349,67 @@ def main(config):
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_jit = jax.jit(make_train(config))
     out = jax.vmap(train_jit)(rngs)
+
+    # 取第一个种子的训练参数
+    trained_params = jax.tree.map(
+        lambda x: x[0],
+        out["runner_state"][0].params,
+    )
+
+    # 创建一个未包装的环境，用训练好的策略运行一个 episode
+    eval_env = jaxmarl.make(
+        config["ENV_NAME"],
+        **config["ENV_KWARGS"],
+    )
+
+    eval_network = ActorCritic(
+        eval_env.action_space(eval_env.agents[0]).n,
+        activation=config["ACTIVATION"],
+    )
+
+    eval_key = jax.random.PRNGKey(config["SEED"] + 1000)
+    obs, env_state = eval_env.reset(eval_key)
+
+    state_seq = [jax.device_get(env_state)]
+
+    for _ in range(eval_env.max_steps + 1):
+        obs_batch = batchify(
+            obs,
+            eval_env.agents,
+            eval_env.num_agents,
+        )
+
+        pi, _ = eval_network.apply(trained_params, obs_batch)
+
+        # 使用概率最大的动作，便于稳定展示
+        action = pi.mode()
+
+        actions = {
+            agent: action[i]
+            for i, agent in enumerate(eval_env.agents)
+        }
+
+        eval_key, step_key = jax.random.split(eval_key)
+
+        obs, env_state, reward, done, info = eval_env.step(
+            step_key,
+            env_state,
+            actions,
+        )
+
+        state_seq.append(jax.device_get(env_state))
+
+        if bool(jax.device_get(done["__all__"])):
+            break
+
+    # 保存动画，不弹出窗口
+    visualizer = MPEVisualizer(eval_env, state_seq)
+    visualizer.animate(
+        save_fname="ippo_ff_mpe.gif",
+        view=False,
+    )
+
+    print("动画已保存：ippo_ff_mpe.gif")
 
     plt.plot(out["metrics"]["returned_episode_returns"].mean(axis=0))
     plt.savefig(f"ippo_ff_{config['ENV_NAME']}.png")
