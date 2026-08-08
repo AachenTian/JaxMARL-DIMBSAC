@@ -16,3 +16,10 @@ wandb/
 outputs/
 models/
 build/
+
+# PyCharm
+.idea/
+
+# Local experiment outputs
+*.gif
+*.png
