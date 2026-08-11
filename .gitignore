@@ -22,4 +22,17 @@ build/
 
 # Local experiment outputs
 *.gif
-*.png
+*.pngbaselines/DIMBSAC/*.log
+baselines/DIMBSAC/wandb/
+__pycache__/
+*.pyc
+
+# DIMBSAC local experiment artifacts
+baselines/DIMBSAC/*.log
+baselines/DIMBSAC/wandb/
+baselines/DIMBSAC/jax
+ippo_ff_MPE_simple_spread_v3.png
+
+# Python cache
+__pycache__/
+*.pyc

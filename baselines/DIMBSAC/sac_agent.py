@@ -16,6 +16,10 @@ from networks.actor import (
 )
 from networks.critic import SACCritic
 
+from sac_batch import (
+    real_batch_to_sac_batch,
+)
+
 
 class SACAgentState(NamedTuple):
     """Train states for one independent SAC agent."""
@@ -247,14 +251,14 @@ def sample_joint_actions_for_actor_update(
 
     return joint_action, own_log_prob
 
-
-def update_sac_agent(
+def _update_sac_agent_core(
     agent_idx: int,
     agent_state: SACAgentState,
     actor: SACActor,
     critic: SACCritic,
     actor_param_snapshots: Sequence,
-    batch,
+    critic_batch,
+    actor_batch,
     rng,
     action_low,
     action_high,
@@ -263,7 +267,10 @@ def update_sac_agent(
     tau: float,
 ):
     """
-    Perform one SAC update for Agent_i using real replay data.
+    Perform one SAC update for Agent_i.
+
+    Critic and actor batches are separated so their data
+    sources can be configured independently.
     """
 
     rng, target_action_rng, actor_action_rng = (
@@ -281,7 +288,9 @@ def update_sac_agent(
         sample_joint_actions(
             actor=actor,
             actor_params=actor_param_snapshots,
-            joint_obs=batch.next_obs,
+            joint_obs=(
+                critic_batch.next_obs
+            ),
             rng=target_action_rng,
             action_low=action_low,
             action_high=action_high,
@@ -293,7 +302,7 @@ def update_sac_agent(
             "params":
                 agent_state.target_critic1_params
         },
-        batch.next_obs,
+        critic_batch.next_obs,
         next_joint_action,
     )
 
@@ -302,17 +311,18 @@ def update_sac_agent(
             "params":
                 agent_state.target_critic2_params
         },
-        batch.next_obs,
+        critic_batch.next_obs,
         next_joint_action,
     )
 
     target = compute_critic_target(
-        rewards=batch.rewards[:, agent_idx],
-        dones=batch.dones,
+        rewards=critic_batch.rewards,
+        dones=critic_batch.dones,
         target_q1=target_q1,
         target_q2=target_q2,
         next_log_prob=next_log_probs[
-            :, agent_idx
+            :,
+            agent_idx,
         ],
         gamma=gamma,
         alpha=alpha,
@@ -328,14 +338,14 @@ def update_sac_agent(
     ):
         q1 = critic.apply(
             {"params": q1_params},
-            batch.obs,
-            batch.actions,
+            critic_batch.obs,
+            critic_batch.actions,
         )
 
         q2 = critic.apply(
             {"params": q2_params},
-            batch.obs,
-            batch.actions,
+            critic_batch.obs,
+            critic_batch.actions,
         )
 
         return critic_loss(
@@ -345,8 +355,14 @@ def update_sac_agent(
         )
 
     (
-        (critic_total_loss, critic_metrics),
-        (q1_grads, q2_grads),
+        (
+            critic_total_loss,
+            critic_metrics,
+        ),
+        (
+            q1_grads,
+            q2_grads,
+        ),
     ) = jax.value_and_grad(
         critic_objective,
         argnums=(0, 1),
@@ -381,8 +397,10 @@ def update_sac_agent(
         ) = sample_joint_actions_for_actor_update(
             actor=actor,
             own_actor_params=actor_params,
-            other_actor_params=actor_param_snapshots,
-            joint_obs=batch.obs,
+            other_actor_params=(
+                actor_param_snapshots
+            ),
+            joint_obs=actor_batch.obs,
             agent_idx=agent_idx,
             rng=actor_action_rng,
             action_low=action_low,
@@ -390,14 +408,20 @@ def update_sac_agent(
         )
 
         q1 = critic.apply(
-            {"params": critic1_state.params},
-            batch.obs,
+            {
+                "params":
+                    critic1_state.params
+            },
+            actor_batch.obs,
             policy_joint_action,
         )
 
         q2 = critic.apply(
-            {"params": critic2_state.params},
-            batch.obs,
+            {
+                "params":
+                    critic2_state.params
+            },
+            actor_batch.obs,
             policy_joint_action,
         )
 
@@ -409,7 +433,10 @@ def update_sac_agent(
         )
 
     (
-        (actor_total_loss, actor_metrics),
+        (
+            actor_total_loss,
+            actor_metrics,
+        ),
         actor_grads,
     ) = jax.value_and_grad(
         actor_objective,
@@ -444,8 +471,12 @@ def update_sac_agent(
         actor=actor_state,
         critic1=critic1_state,
         critic2=critic2_state,
-        target_critic1_params=target_critic1_params,
-        target_critic2_params=target_critic2_params,
+        target_critic1_params=(
+            target_critic1_params
+        ),
+        target_critic2_params=(
+            target_critic2_params
+        ),
     )
 
     metrics = {
@@ -453,4 +484,94 @@ def update_sac_agent(
         **actor_metrics,
     }
 
-    return new_agent_state, metrics
+    return (
+        new_agent_state,
+        metrics,
+    )
+
+def update_sac_agent(
+    agent_idx: int,
+    agent_state: SACAgentState,
+    actor: SACActor,
+    critic: SACCritic,
+    actor_param_snapshots: Sequence,
+    batch,
+    rng,
+    action_low,
+    action_high,
+    gamma: float,
+    alpha: float,
+    tau: float,
+):
+    """
+    Real-replay-only SAC update.
+
+    This wrapper preserves the original baseline behavior.
+    """
+
+    real_sac_batch = (
+        real_batch_to_sac_batch(
+            real_batch=batch,
+            agent_idx=agent_idx,
+        )
+    )
+
+    return _update_sac_agent_core(
+        agent_idx=agent_idx,
+        agent_state=agent_state,
+        actor=actor,
+        critic=critic,
+        actor_param_snapshots=(
+            actor_param_snapshots
+        ),
+        critic_batch=(
+            real_sac_batch
+        ),
+        actor_batch=(
+            real_sac_batch
+        ),
+        rng=rng,
+        action_low=action_low,
+        action_high=action_high,
+        gamma=gamma,
+        alpha=alpha,
+        tau=tau,
+    )
+
+def update_sac_agent_with_batches(
+    agent_idx: int,
+    agent_state: SACAgentState,
+    actor: SACActor,
+    critic: SACCritic,
+    actor_param_snapshots: Sequence,
+    critic_batch,
+    actor_batch,
+    rng,
+    action_low,
+    action_high,
+    gamma: float,
+    alpha: float,
+    tau: float,
+):
+    """
+    SAC update with independently specified critic
+    and actor training batches.
+    """
+
+    return _update_sac_agent_core(
+        agent_idx=agent_idx,
+        agent_state=agent_state,
+        actor=actor,
+        critic=critic,
+        actor_param_snapshots=(
+            actor_param_snapshots
+        ),
+        critic_batch=critic_batch,
+        actor_batch=actor_batch,
+        rng=rng,
+        action_low=action_low,
+        action_high=action_high,
+        gamma=gamma,
+        alpha=alpha,
+        tau=tau,
+    )

@@ -1,0 +1,130 @@
+# Environment
+ENV:
+  NAME: "MPE_simple_spread_v3"
+  ACTION_TYPE: "Continuous"
+  NUM_ENVS: 32
+  NUM_EVAL_ENVS: 32
+  EPISODE_HORIZON: 25
+  SEED: 0
+  EVAL_SEED: 12345
+
+# Training schedule
+TRAIN:
+  # Phase 6E.2 pilot: 6400-step initial model training + 200 periodic
+  # dynamics retrains. With NUM_ENVS=32 and interval=250, the actual
+  # vectorized retrain stride is 256 transitions: 6400 + 200*256 = 57600.
+  TOTAL_ENV_STEPS: 57600
+
+  # Real-only SAC starts before learned dynamics are initialized.
+  LEARNING_STARTS: 2000
+
+  # Number of SAC update rounds after each vectorized real collector step.
+  UPDATES_PER_COLLECT_STEP: 4
+
+  # Fixed-seed deterministic evaluation every 5 actual retrain cycles.
+  # 5 * 256 = 1280 real transitions with NUM_ENVS=32.
+  EVAL_INTERVAL_ENV_STEPS: 1280
+
+# Shared real replay buffer
+REPLAY:
+  CAPACITY: 100000
+
+  # Total SAC batch size. MODEL_RATIO determines how many samples come
+  # from D_real versus learner-specific D_model_i.
+  BATCH_SIZE: 256
+
+# Actor
+ACTOR:
+  HIDDEN_DIMS: [256, 256]
+  LR: 0.0003
+  LOG_STD_MIN: -5.0
+  LOG_STD_MAX: 2.0
+
+# Critic
+CRITIC:
+  HIDDEN_DIMS: [256, 256]
+  LR: 0.0003
+
+# SAC
+SAC:
+  GAMMA: 0.99
+  ALPHA: 0.2
+  TAU: 0.005
+
+  # Phase 6E pilot value only; final rho is still TBD.
+  MODEL_RATIO: 0.5
+
+# Dynamics model
+DYNAMICS:
+  HIDDEN_DIMS: [256, 256]
+  LR: 0.001
+
+  LOG_VAR_MIN: -10.0
+  LOG_VAR_MAX: 2.0
+
+  BATCH_SIZE: 256
+
+  # Standalone dynamics tests only.
+  TRAIN_STEPS: 1500
+  EVAL_INTERVAL: 300
+  TRAIN_FRACTION: 0.8
+
+  ENSEMBLE_SIZE: 5
+  BOOTSTRAP: true
+
+  # ------------------------------------------------------
+  # DIMBSAC periodic dynamics training
+  # ------------------------------------------------------
+
+  # Number of real transitions required before dynamics models are
+  # initialized for the first time. Normalization statistics are fixed
+  # from this initial warmup training split and remain frozen afterward.
+  INIT_REAL_TRANSITIONS: 6400
+
+  # Counted in individual real environment transitions, not vectorized
+  # collector iterations. With NUM_ENVS=32, a threshold of 250 is crossed
+  # every 256 collected transitions.
+  RETRAIN_INTERVAL_ENV_STEPS: 250
+
+  # Per-retrain inner training budget. This is independent of the outer
+  # number of periodic retraining events below. Early stopping selects the
+  # actual number of epochs; 50 is only a safety ceiling for this pilot.
+  MAX_RETRAIN_EPOCHS: 50
+  EARLY_STOPPING_PATIENCE: 10
+  EARLY_STOPPING_MIN_DELTA: 1.0e-5
+
+  # Outer-loop budget: initial dynamics training is NOT counted here.
+  NUM_PERIODIC_RETRAINS: 200
+
+# Model rollout
+MODEL_ROLLOUT:
+  # Phase 6E pilot values; final rollout batch size and horizon are TBD.
+  BATCH_SIZE: 256
+  HORIZON: 5
+
+# Persistent learner-specific synthetic replay buffers
+MODEL_REPLAY:
+  CAPACITY: 100000
+
+# Weights & Biases experiment logging (Phase 6E.2 paired pre/post diagnostics)
+WANDB:
+  ENABLED: true
+  ENTITY: "yachen-tian-rwth-aachen-university"
+  PROJECT: "JaxMARL-DIMBSAC"
+  GROUP: "simple_spread"
+  MODE: "online"
+  RUN_NAME_PREFIX: "dimbsac-simple-spread"
+
+  # Logging-only dynamics diagnostics. One batch is sampled before each
+  # dynamics refresh and reused for both PRE and POST measurements. These
+  # diagnostics do not affect the training RNG or checkpoint choice.
+  DYNAMICS_DIAGNOSTIC_BATCH_SIZE: 2048
+  DYNAMICS_DIAGNOSTIC_SEED: 24680
+
+# Keep Hydra from changing the project working directory.
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: .
+  output_subdir: null
