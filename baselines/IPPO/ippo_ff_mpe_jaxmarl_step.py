@@ -1,5 +1,11 @@
 """
-Based on the PureJaxRL Implementation of PPO
+Based on the original JaxMARL feed-forward IPPO implementation.
+
+Controlled change in this file:
+    standard SimpleSpread observation + normalized episode step (t / T)
+
+The original JaxMARL FF network architecture and PPO update structure are
+otherwise unchanged.
 """
 
 import os
@@ -86,6 +92,31 @@ def batchify(x: dict, agent_list, num_actors):
     return x.reshape((num_actors, -1))
 
 
+def batchify_with_normalized_step(
+    x: dict,
+    state_step: jnp.ndarray,
+    agent_list,
+    num_actors: int,
+    num_envs: int,
+    max_steps: int,
+):
+    """Batch the original observation and append normalized episode progress."""
+    obs_batch = batchify(x, agent_list, num_actors)
+
+    normalized_step = (
+        jnp.asarray(state_step, dtype=jnp.float32) / float(max_steps)
+    ).reshape((num_envs, 1))
+
+    # batchify() is agent-major:
+    # [agent0 env0..N, agent1 env0..N, ...].
+    normalized_step = jnp.tile(
+        normalized_step[None, :, :],
+        (len(agent_list), 1, 1),
+    ).reshape((num_actors, 1))
+
+    return jnp.concatenate([obs_batch, normalized_step], axis=-1)
+
+
 def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     x = x.reshape((num_actors, num_envs, -1))
     return {a: x[i] for i, a in enumerate(agent_list)}
@@ -118,7 +149,8 @@ def make_train(config):
             env.action_space(env.agents[0]).n, activation=config["ACTIVATION"]
         )
         rng, _rng = jax.random.split(rng)
-        init_x = jnp.zeros(env.observation_space(env.agents[0]).shape)
+        obs_dim = env.observation_space(env.agents[0]).shape[0]
+        init_x = jnp.zeros((obs_dim + 1,), dtype=jnp.float32)
         network_params = network.init(_rng, init_x)
         if config["ANNEAL_LR"]:
             tx = optax.chain(
@@ -148,7 +180,14 @@ def make_train(config):
             def _env_step(runner_state, unused):
                 train_state, env_state, last_obs, rng = runner_state
 
-                obs_batch = batchify(last_obs, env.agents, config["NUM_ACTORS"])
+                obs_batch = batchify_with_normalized_step(
+                    last_obs,
+                    env_state.env_state.step,
+                    env.agents,
+                    config["NUM_ACTORS"],
+                    config["NUM_ENVS"],
+                    env.max_steps,
+                )
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
 
@@ -187,7 +226,14 @@ def make_train(config):
 
             # CALCULATE ADVANTAGE
             train_state, env_state, last_obs, rng = runner_state
-            last_obs_batch = batchify(last_obs, env.agents, config["NUM_ACTORS"])
+            last_obs_batch = batchify_with_normalized_step(
+                last_obs,
+                env_state.env_state.step,
+                env.agents,
+                config["NUM_ACTORS"],
+                config["NUM_ENVS"],
+                env.max_steps,
+            )
             _, last_val = network.apply(train_state.params, last_obs_batch)
 
             def _calculate_gae(traj_batch, last_val):
@@ -301,83 +347,23 @@ def make_train(config):
                 update_state = (train_state, traj_batch, advantages, targets, rng)
                 return update_state, loss_info
 
-            update_state = (
-                train_state,
-                traj_batch,
-                advantages,
-                targets,
-                rng,
-            )
-
-            update_state, loss_info = jax.lax.scan(
-                _update_epoch,
-                update_state,
-                None,
-                config["UPDATE_EPOCHS"],
-            )
-
-            train_state = update_state[0]
-            metric = traj_batch.info
-            rng = update_state[-1]
-
-            train_state = update_state[0]
-            metric = traj_batch.info
-            rng = update_state[-1]
-
-            r0 = {
-                "ratio0": loss_info["ratio"][0, 0].mean()
-            }
-
-            loss_info = jax.tree.map(
-                lambda x: x.mean(),
-                loss_info,
-            )
-
-            # Keep the rollout structure so episodic returns can be
-            # computed only from completed episodes.
-            metric = jax.tree.map(
-                lambda x: x.reshape(
-                    (
-                        config["NUM_STEPS"],
-                        config["NUM_ENVS"],
-                        env.num_agents,
-                    )
-                ),
-                metric,
-            )
-
-            metric["loss"] = {
-                **loss_info,
-                **r0,
-            }
-
             def callback(metric):
-                # Episode information is duplicated across agents, so use
-                # one agent index to avoid counting the same episode repeatedly.
-                completed = metric[
-                    "returned_episode"
-                ][:, :, 0]
+                wandb.log(metric)
 
-                episode_returns = metric[
-                    "returned_episode_returns"
-                ][:, :, 0]
-
-                log_data = {
-                    "returns": episode_returns[
-                        completed
-                    ].mean(),
-                }
-
-                for key, value in metric["loss"].items():
-                    log_data[key] = value
-
-                wandb.log(log_data)
-
-            jax.experimental.io_callback(
-                callback,
-                None,
-                metric,
+            update_state = (train_state, traj_batch, advantages, targets, rng)
+            update_state, loss_info = jax.lax.scan(
+                _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
             )
+            train_state = update_state[0]
+            metric = traj_batch.info
+            rng = update_state[-1]
+
+            r0 = {"ratio0": loss_info["ratio"][0, 0].mean()}
+            # jax.debug.print('ratio0 {x}', x=r0["ratio0"])
+            loss_info = jax.tree.map(lambda x: x.mean(), loss_info)
+            metric = jax.tree.map(lambda x: x.mean(), metric)
+            metric = {**metric, **loss_info, **r0}
+            jax.experimental.io_callback(callback, None, metric)
             runner_state = (train_state, env_state, last_obs, rng)
             return runner_state, metric
 
@@ -391,7 +377,7 @@ def make_train(config):
     return train
 
 
-@hydra.main(version_base=None, config_path="config", config_name="ippo_ff_mpe")
+@hydra.main(version_base=None, config_path="config", config_name="ippo_ff_mpe_jaxmarl_step")
 def main(config):
     config = OmegaConf.to_container(config)
 
@@ -433,10 +419,13 @@ def main(config):
     state_seq = [jax.device_get(env_state)]
 
     for _ in range(eval_env.max_steps + 1):
-        obs_batch = batchify(
+        obs_batch = batchify_with_normalized_step(
             obs,
+            env_state.step,
             eval_env.agents,
             eval_env.num_agents,
+            1,
+            eval_env.max_steps,
         )
 
         pi, _ = eval_network.apply(trained_params, obs_batch)
@@ -465,49 +454,19 @@ def main(config):
     # 保存动画，不弹出窗口
     visualizer = MPEVisualizer(eval_env, state_seq)
     visualizer.animate(
-        save_fname="ippo_ff_mpe.gif",
+        save_fname="ippo_ff_mpe_jaxmarl_step.gif",
         view=False,
     )
 
-    print("动画已保存：ippo_ff_mpe.gif")
+    print("动画已保存：ippo_ff_mpe_jaxmarl_step.gif")
 
-    # Build the same completed-episode return used for W&B logging.
-    episode_returns = out["metrics"]["returned_episode_returns"][
-        :, :, :, 0
-    ]
-    completed = out["metrics"]["returned_episode"][
-        :, :, :, 0
-    ]
-
-    return_sum = jnp.sum(
-        episode_returns * completed,
-        axis=(1, 2),
-    )
-
-    num_completed = jnp.sum(
-        completed,
-        axis=(1, 2),
-    )
-
-    mean_returns = jnp.where(
-        num_completed > 0,
-        return_sum / num_completed,
-        jnp.nan,
-    )
-
-    plt.figure()
-    plt.plot(mean_returns)
+    plt.plot(out["metrics"]["returned_episode_returns"].mean(axis=0))
+    plt.savefig(f"ippo_ff_jaxmarl_step_{config['ENV_NAME']}.png")
     plt.xlabel("Updates")
     plt.ylabel("Returns")
-    plt.title(
-        f"IPPO-FF={config['ENV_NAME']}"
-    )
-    plt.savefig(
-        f"ippo_ff_{config['ENV_NAME']}.png"
-    )
-    plt.close()
+    plt.title(f"IPPO-FF JaxMARL + step={config['ENV_NAME']}")
 
-    updates_x = jnp.arange(out["metrics"]["total_loss"][0].shape[0])
+    """updates_x = jnp.arange(out["metrics"]["total_loss"][0].shape[0])
     loss_table = jnp.stack([updates_x, out["metrics"]["total_loss"].mean(axis=0), out["metrics"]["actor_loss"].mean(axis=0), out["metrics"]["critic_loss"].mean(axis=0), out["metrics"]["entropy"].mean(axis=0), out["metrics"]["ratio"].mean(axis=0)], axis=1)
     loss_table = wandb.Table(data=loss_table.tolist(), columns=["updates", "total_loss", "actor_loss", "critic_loss", "entropy", "ratio"])
     updates_x = jnp.arange(out["metrics"]["returned_episode_returns"][0].shape[0])
@@ -521,7 +480,7 @@ def main(config):
         "critic_loss_plot": wandb.plot.line(loss_table, "updates", "critic_loss", title="critic_loss_vs_updates"),
         "entropy_plot": wandb.plot.line(loss_table, "updates", "entropy", title="entropy_vs_updates"),
         "ratio_plot": wandb.plot.line(loss_table, "updates", "ratio", title="ratio_vs_updates"),
-    })
+    })"""
 
 
 if __name__ == "__main__":

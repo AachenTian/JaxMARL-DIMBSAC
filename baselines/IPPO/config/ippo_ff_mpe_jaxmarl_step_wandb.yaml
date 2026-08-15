@@ -1,3 +1,6 @@
+# Original JaxMARL IPPO-FF configuration.
+# The only algorithm/input change is implemented in the Python file:
+# append normalized episode step t/T to the standard observation.
 "LR": 2.5e-4
 "NUM_ENVS": 16
 "NUM_STEPS": 128
@@ -14,10 +17,10 @@
 "ENV_NAME": "MPE_simple_spread_v3"
 "ENV_KWARGS": {}
 "ANNEAL_LR": True
-"SEED": 50
+"SEED": 30
 "NUM_SEEDS": 1
 
-# WandB Params
+# W&B/run-control fields for the current single-seed comparison.
 "ENTITY": "yachen-tian-rwth-aachen-university"
 "PROJECT": "jaxmarl-mpe"
-"WANDB_MODE" : "offline"
+"WANDB_MODE": "online"

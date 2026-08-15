@@ -1,0 +1,32 @@
+# Agent-centric physical-state diagnostic with explicit agent identity.
+# Adds exactly one feature to the previous abs-velocity + one-hot version:
+# normalized episode step = state.step / env.max_steps.
+# Default 3-agent SimpleSpread input: 18-D physical state + 3-D one-hot
+# + 1-D normalized step = 22-D total.
+"INPUT_MODE": "agent_centric_state_abs_vel_onehot_step"
+"ENV_NAME": "MPE_simple_spread_v3"
+"ENV_KWARGS": {}
+
+# Match the official IPPO-RNN optimization regime.
+"LR": 5e-4
+"NUM_ENVS": 16
+"NUM_STEPS": 128
+"FC_DIM_SIZE": 128
+"FF_LATENT_DIM": 128
+"TOTAL_TIMESTEPS": 1e7
+"UPDATE_EPOCHS": 4
+"NUM_MINIBATCHES": 2
+"GAMMA": 0.99
+"GAE_LAMBDA": 0.95
+"CLIP_EPS": 0.3
+"SCALE_CLIP_EPS": False
+"ENT_COEF": 0.01
+"VF_COEF": 1.0
+"MAX_GRAD_NORM": 0.5
+"ANNEAL_LR": True
+"SEED": 30
+
+# WandB
+"ENTITY": "yachen-tian-rwth-aachen-university"
+"PROJECT": "jaxmarl-mpe"
+"WANDB_MODE": "online"

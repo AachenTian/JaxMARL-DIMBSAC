@@ -36,3 +36,7 @@ ippo_ff_MPE_simple_spread_v3.png
 # Python cache
 __pycache__/
 *.pyc
+
+# IPPO experiment artifacts
+baselines/IPPO/*.png
+baselines/IPPO/*.gif

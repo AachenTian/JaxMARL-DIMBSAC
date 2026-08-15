@@ -1,0 +1,34 @@
+# Agent-centric physical-state diagnostic with fixed global agent slots.
+# Default 3-agent / 3-landmark input is 25-D:
+# own vel/pos (4) + landmark-relative positions (6)
+# + all-agent relative positions in fixed ID slots (6)
+# + all-agent absolute velocities in fixed ID slots (6)
+# + one-hot ego agent ID (3).
+# No normalized episode-step feature is included in this experiment.
+"INPUT_MODE": "agent_centric_state_fixed_slots_onehot"
+"ENV_NAME": "MPE_simple_spread_v3"
+"ENV_KWARGS": {}
+
+# Match the official IPPO-RNN optimization regime.
+"LR": 5e-4
+"NUM_ENVS": 16
+"NUM_STEPS": 128
+"FC_DIM_SIZE": 128
+"FF_LATENT_DIM": 128
+"TOTAL_TIMESTEPS": 1e7
+"UPDATE_EPOCHS": 4
+"NUM_MINIBATCHES": 2
+"GAMMA": 0.99
+"GAE_LAMBDA": 0.95
+"CLIP_EPS": 0.3
+"SCALE_CLIP_EPS": False
+"ENT_COEF": 0.01
+"VF_COEF": 1.0
+"MAX_GRAD_NORM": 0.5
+"ANNEAL_LR": True
+"SEED": 30
+
+# WandB
+"ENTITY": "yachen-tian-rwth-aachen-university"
+"PROJECT": "jaxmarl-mpe"
+"WANDB_MODE": "online"
