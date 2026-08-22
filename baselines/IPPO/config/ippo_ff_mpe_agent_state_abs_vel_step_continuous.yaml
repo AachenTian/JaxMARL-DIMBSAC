@@ -1,0 +1,55 @@
+# Continuous-action Beta version.
+#
+# This file inherits the ORIGINAL matched-FF abs_vel_step configuration so
+# LR / PPO clip / VF coefficient / entropy coefficient / minibatches / seed /
+# total timesteps / W&B ENTITY / W&B PROJECT stay exactly aligned with the
+# experiment you already used.
+defaults:
+  - ippo_ff_mpe_agent_state_abs_vel_step
+  - _self_
+
+# Keep the successful 19D policy input unchanged.
+INPUT_MODE: "agent_centric_state_abs_vel_step"
+
+# Key experimental change:
+#   discrete Categorical policy -> 5D continuous Beta policy
+# and use the no-physical-collision environment.
+ENV_KWARGS:
+  action_type: "Continuous"
+  contact_force: 0.0
+  max_steps: 25
+
+# alpha = softplus(alpha_raw) + this value
+# beta  = softplus(beta_raw)  + this value
+#
+# 1.0 is a conservative/stable first experiment: alpha,beta stay > 1.
+BETA_MIN_CONCENTRATION: 1.0
+BETA_MAX_CONCENTRATION: 100.0
+
+# Keep sampled actions away from exact 0 / 1 before evaluating Beta log_prob.
+ACTION_EPS: 1.0e-6
+
+# Added to any WANDB_TAGS supplied through the shell.
+TAGS:
+  - "continuous_action"
+  - "beta_actor"
+  - "abs_vel_step"
+  - "contact_force_0"
+
+WANDB_GROUP: "ippo_ff_continuous_beta"
+WANDB_RUN_NAME: null
+
+CHECKPOINT:
+  ENABLED: true
+  DIR: "checkpoints/ippo_ff_mpe_agent_state_abs_vel_step_continuous"
+  FILE_PREFIX: "ippo_ff_abs_vel_step_beta_no_collision"
+  LOG_WANDB_ARTIFACT: true
+
+# Do not let Hydra move the working directory. This keeps checkpoint paths
+# predictable relative to the IPPO baseline directory.
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: .
+  output_subdir: null
