@@ -1,0 +1,103 @@
+# ============================================================================
+# Joint MODEL-FREE training: shared continuous Beta IPPO + auxiliary dynamics
+# ============================================================================
+#
+# PPO data:
+#   TRUE real-environment 19D inputs -> shared policy -> REAL env interaction.
+#
+# Dynamics data:
+#   the same REAL transitions:
+#       [x_i(real,4), a_i(real,5)] -> delta_x_i(real,4)
+#
+# No estimator/model rollout is used to generate PPO training data.
+
+ENV:
+  NAME: "MPE_simple_spread_v3"
+  ACTION_TYPE: "Continuous"
+  CONTACT_FORCE: 0.0
+  EPISODE_HORIZON: 25
+  KWARGS:
+    action_type: "Continuous"
+    contact_force: 0.0
+    max_steps: 25
+
+PPO:
+  # Keep the matched FF / successful 19D experiment hyperparameters.
+  LR: 5.0e-4
+  NUM_ENVS: 16
+  NUM_STEPS: 128
+  FC_DIM_SIZE: 128
+  FF_LATENT_DIM: 128
+  TOTAL_TIMESTEPS: 1.0e7
+  UPDATE_EPOCHS: 4
+  NUM_MINIBATCHES: 2
+  GAMMA: 0.99
+  GAE_LAMBDA: 0.95
+  CLIP_EPS: 0.3
+  SCALE_CLIP_EPS: false
+  ENT_COEF: 0.01
+  VF_COEF: 1.0
+  MAX_GRAD_NORM: 0.5
+  ANNEAL_LR: true
+  SEED: 30
+
+  # Continuous 5D Beta actor. Keep the numerical clips from the stable v2 run.
+  BETA_MIN_CONCENTRATION: 1.0
+  BETA_MAX_CONCENTRATION: 100.0
+  ACTION_EPS: 1.0e-6
+
+DYNAMICS:
+  # Three independent local 9D -> 4D probabilistic ensembles.
+  ENSEMBLE_SIZE: 5
+  HIDDEN_DIMS: [256, 256]
+  LR: 1.0e-3
+  LOG_VAR_MIN: -10.0
+  LOG_VAR_MAX: 2.0
+
+  # Real current-policy replay only. No synthetic/model data.
+  REPLAY_CAPACITY: 100000
+
+  # Wait for enough real policy transitions, compute z-score stats ONCE,
+  # then freeze those normalization statistics for the rest of training.
+  WARMUP_TRANSITIONS: 4096
+  NORMALIZATION_SAMPLES: 4096
+
+  # Existing ensemble weights are continued; they are never reinitialized.
+  UPDATE_INTERVAL: 20
+  GRAD_STEPS_PER_UPDATE: 20
+  BATCH_SIZE: 256
+
+  # Compatible with the existing estimator rollout loader.
+  CHECKPOINT_DIR: "checkpoints/joint_ippo_dynamics/local_dynamics"
+
+CHECKPOINT:
+  POLICY_DIR: "checkpoints/joint_ippo_dynamics/policy"
+  POLICY_PREFIX: "joint_ippo_beta_true_state"
+
+  # 0 = final only. A positive value also stores policy/dynamics snapshots.
+  SAVE_INTERVAL_UPDATES: 0
+
+WANDB:
+  ENABLED: true
+  MODE: "online"
+  ENTITY: "yachen-tian-rwth-aachen-university"
+  PROJECT: "jaxmarl-estimator"
+  GROUP: "joint-ippo-dynamics-model-free"
+  RUN_NAME: null
+  TAGS:
+    - "model_free"
+    - "joint_training"
+    - "shared_beta_ippo"
+    - "policy_collected_dynamics"
+    - "true_state_policy_training"
+    - "contact_force_0"
+
+LOGGING:
+  PRINT_INTERVAL_UPDATES: 20
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: .
+  output_subdir: null

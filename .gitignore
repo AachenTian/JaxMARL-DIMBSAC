@@ -40,3 +40,18 @@ __pycache__/
 # IPPO experiment artifacts
 baselines/IPPO/*.png
 baselines/IPPO/*.gif
+
+# ESTIMATOR runtime artifacts
+baselines/ESTIMATOR/checkpoints/
+baselines/ESTIMATOR/animations/
+baselines/ESTIMATOR/*.log
+baselines/ESTIMATOR/wandb/
+
+# IPPO runtime artifacts
+baselines/IPPO/checkpoints/
+baselines/IPPO/*.log
+
+# Python cache
+**/__pycache__/
+*.pyc
+baselines/ESTIMATOR/README_*.txt

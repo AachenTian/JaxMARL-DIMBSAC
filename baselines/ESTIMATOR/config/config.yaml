@@ -1,0 +1,83 @@
+# ================================================================
+# ESTIMATOR / independent local dynamics experiments
+# ================================================================
+
+EXPERIMENT:
+  NAME: "independent_dynamics"
+
+ENV:
+  NAME: "MPE_simple_spread_v3"
+  ACTION_TYPE: "Continuous"
+  NUM_ENVS: 32
+  EPISODE_HORIZON: 25
+  SEED: 0
+
+  # Physical collision force is disabled, while SimpleSpread collision reward
+  # remains defined by the environment's geometric collision test.
+  CONTACT_FORCE: 0.0
+  U_NOISE:
+    - 2.0
+    - 2.0
+    - 2.0
+
+DATA:
+  NUM_COLLECT_STEPS: 200
+  EXPECTED_REAL_TRANSITIONS: 6400
+
+DYNAMICS:
+  ENSEMBLE_SIZE: 5
+  HIDDEN_DIMS: [256, 256]
+  LR: 0.001
+
+  LOG_VAR_MIN: -10.0
+  LOG_VAR_MAX: 2.0
+
+  TRAIN_FRACTION: 0.8
+  BATCH_SIZE: 256
+  TRAIN_STEPS: 1500
+  EVAL_INTERVAL: 300
+
+  # Inference checkpoint used by estimator rollout.
+  CHECKPOINT_DIR: "checkpoints/joint_ippo_dynamics/local_dynamics"
+
+ESTIMATOR:
+  ENABLED: true
+  FULL_ANIMATION_DIR: "animations/u_noise_0p20"
+
+  # Closed-loop state-propagation diagnostic.
+  NUM_EVAL_ENVS: 32
+  EVAL_SEED: 12345
+  ROLLOUT_HORIZON: 25
+  WANDB_GROUP: "state-estimator-rollout"
+
+  POLICY:
+    # Relative to baselines/ESTIMATOR when Hydra job.chdir=false.
+    CHECKPOINT_PATH: "checkpoints/joint_ippo_dynamics/policy/joint_ippo_beta_true_state_seed30_final.msgpack"
+
+    INPUT_DIM: 19
+    ACTION_DIM: 5
+    FC_DIM_SIZE: 128
+    FF_LATENT_DIM: 128
+
+    BETA_MIN_CONCENTRATION: 1.0
+    BETA_MAX_CONCENTRATION: 100.0
+    ACTION_EPS: 1.0e-6
+
+WANDB:
+  ENABLED: true
+  MODE: "online"
+  ENTITY: "yachen-tian-rwth-aachen-university"
+  PROJECT: "jaxmarl-estimator"
+  RUN_NAME: null
+  GROUP: "independent-dynamics"
+  TAGS:
+    - "simple_spread"
+    - "independent_dynamics"
+    - "contact_force_0"
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: .
+  output_subdir: null
